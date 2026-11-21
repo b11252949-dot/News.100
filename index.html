@@ -1,0 +1,309 @@
+
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NEWS 100</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;
+ font-family:Arial,sans-serif;
+ background:#f1f4f8;
+ color:#172033;
+}
+header{
+ background:#102b50;
+ color:white;
+ padding:20px;
+ text-align:center;
+}
+header h1{margin:0;font-size:30px}
+header p{margin:7px 0 0}
+.container{
+ max-width:750px;
+ margin:20px auto;
+ padding:12px;
+}
+.box{
+ background:white;
+ padding:18px;
+ border-radius:12px;
+ margin-bottom:18px;
+ box-shadow:0 2px 9px #0001;
+}
+input,textarea,button{
+ width:100%;
+ padding:12px;
+ margin:7px 0;
+ border:1px solid #ccd3dc;
+ border-radius:7px;
+ font-size:16px;
+}
+textarea{min-height:120px}
+button{
+ background:#0755a5;
+ color:white;
+ border:0;
+ font-weight:bold;
+ cursor:pointer;
+}
+button.secondary{background:#555}
+.news{
+ background:white;
+ padding:15px;
+ margin:15px 0;
+ border-radius:10px;
+ box-shadow:0 2px 8px #0001;
+}
+.news img,.news video{
+ width:100%;
+ border-radius:8px;
+ margin-top:10px;
+}
+.hidden{display:none}
+small{color:#667085}
+</style>
+</head>
+
+<body>
+
+<header>
+ <h1>NEWS 100</h1>
+ <p>সর্বশেষ সংবাদ সবার আগে</p>
+</header>
+
+<div class="container">
+
+ <div class="box" id="loginBox">
+  <h2>অ্যাডমিন লগইন</h2>
+  <input type="email" id="email" placeholder="অ্যাডমিন ইমেইল">
+  <input type="password" id="password" placeholder="পাসওয়ার্ড">
+  <button onclick="login()">লগইন</button>
+  <p id="loginMessage"></p>
+ </div>
+
+ <div class="box hidden" id="adminBox">
+  <h2>নতুন নিউজ প্রকাশ করুন</h2>
+
+  <input id="title" placeholder="নিউজের শিরোনাম">
+
+  <textarea id="body" placeholder="নিউজের বিস্তারিত লিখুন"></textarea>
+
+  <label>ছবি অথবা ভিডিও নির্বাচন করুন</label>
+  <input type="file" id="media" accept="image/*,video/*">
+
+  <button onclick="publishNews()">নিউজ প্রকাশ করুন</button>
+  <button class="secondary" onclick="logout()">লগআউট</button>
+
+  <p id="message"></p>
+ </div>
+
+ <h2>সর্বশেষ নিউজ</h2>
+ <div id="newsList">নিউজ লোড হচ্ছে...</div>
+
+</div>
+
+<script>
+// Supabase project information
+const SUPABASE_URL = "YOUR_SUPABASE_PROJECT_URL";
+const SUPABASE_ANON_KEY = "YOUR_SUPABASE_ANON_KEY";
+
+// নিজের অ্যাডমিন ইমেইল বসাবে
+const ADMIN_EMAIL = "YOUR_ADMIN_EMAIL";
+
+const db = supabase.createClient(
+ SUPABASE_URL,
+ SUPABASE_ANON_KEY
+);
+
+let currentUser = null;
+
+function makeSlug(text){
+ return text.toLowerCase()
+ .trim()
+ .replace(/[^\w\u0980-\u09FF]+/g,"-")
+ .replace(/^-|-$/g,"")
+ + "-" + Date.now();
+}
+
+async function login(){
+ const email = document.getElementById("email").value.trim();
+ const password = document.getElementById("password").value;
+
+ const {data,error} = await db.auth.signInWithPassword({
+  email,password
+ });
+
+ if(error){
+  document.getElementById("loginMessage").innerText =
+   "লগইন হয়নি: " + error.message;
+  return;
+ }
+
+ if(data.user.email.toLowerCase() !== ADMIN_EMAIL.toLowerCase()){
+  await db.auth.signOut();
+  document.getElementById("loginMessage").innerText =
+   "এই ইমেইলের অ্যাডমিন অনুমতি নেই।";
+  return;
+ }
+
+ currentUser = data.user;
+ showAdmin();
+}
+
+function showAdmin(){
+ document.getElementById("loginBox").classList.add("hidden");
+ document.getElementById("adminBox").classList.remove("hidden");
+}
+
+async function logout(){
+ await db.auth.signOut();
+ currentUser = null;
+ document.getElementById("adminBox").classList.add("hidden");
+ document.getElementById("loginBox").classList.remove("hidden");
+}
+
+async function publishNews(){
+ if(!currentUser || currentUser.email.toLowerCase() !== ADMIN_EMAIL.toLowerCase()){
+  alert("অ্যাডমিন লগইন প্রয়োজন");
+  return;
+ }
+
+ const title = document.getElementById("title").value.trim();
+ const body = document.getElementById("body").value.trim();
+ const file = document.getElementById("media").files[0];
+
+ if(!title || !body){
+  alert("শিরোনাম ও নিউজের বিবরণ লিখুন");
+  return;
+ }
+
+ const message = document.getElementById("message");
+ message.innerText = "প্রকাশ করা হচ্ছে...";
+
+ let mediaUrl = null;
+ let mediaType = null;
+
+ if(file){
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
+  const filePath = Date.now() + "-" + safeName;
+
+  const {data:uploadData,error:uploadError} =
+   await db.storage.from("news-media")
+   .upload(filePath,file);
+
+  if(uploadError){
+   message.innerText = "মিডিয়া আপলোড হয়নি: " + uploadError.message;
+   return;
+  }
+
+  const {data:urlData} = db.storage
+   .from("news-media")
+   .getPublicUrl(uploadData.path);
+
+  mediaUrl = urlData.publicUrl;
+  mediaType = file.type.startsWith("video/") ? "video" : "image";
+ }
+
+ const slug = makeSlug(title);
+
+ const {error} = await db.from("news").insert([{
+  title:title,
+  body:body,
+  slug:slug,
+  media_url:mediaUrl,
+  media_type:mediaType,
+  published:true
+ }]);
+
+ if(error){
+  message.innerText = "নিউজ প্রকাশ হয়নি: " + error.message;
+  return;
+ }
+
+ message.innerText = "নিউজ সফলভাবে প্রকাশ হয়েছে!";
+
+ document.getElementById("title").value = "";
+ document.getElementById("body").value = "";
+ document.getElementById("media").value = "";
+
+ loadNews();
+}
+
+async function loadNews(){
+ const list = document.getElementById("newsList");
+
+ const {data,error} = await db.from("news")
+ .select("*")
+ .eq("published",true)
+ .order("created_at",{ascending:false});
+
+ if(error){
+  list.innerText = "নিউজ লোড হয়নি। ডাটাবেস সেটআপ পরীক্ষা করুন।";
+  return;
+ }
+
+ if(!data || data.length === 0){
+  list.innerText = "এখনো কোনো নিউজ প্রকাশ করা হয়নি।";
+  return;
+ }
+
+ list.innerHTML = "";
+
+ data.forEach(item=>{
+  const article = document.createElement("article");
+  article.className = "news";
+
+  const heading = document.createElement("h3");
+  heading.textContent = item.title;
+  article.appendChild(heading);
+
+  const content = document.createElement("p");
+  content.textContent = item.body;
+  article.appendChild(content);
+
+  if(item.media_url && item.media_type === "image"){
+   const img = document.createElement("img");
+   img.src = item.media_url;
+   img.alt = item.title;
+   article.appendChild(img);
+  }
+
+  if(item.media_url && item.media_type === "video"){
+   const video = document.createElement("video");
+   video.src = item.media_url;
+   video.controls = true;
+   article.appendChild(video);
+  }
+
+  const link = document.createElement("p");
+  link.textContent = "নিউজ লিংক: /news/" + item.slug;
+  article.appendChild(link);
+
+  list.appendChild(article);
+ });
+}
+
+async function checkLogin(){
+ const {data} = await db.auth.getSession();
+ const user = data.session?.user;
+
+ if(user && user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()){
+  currentUser = user;
+  showAdmin();
+ }else{
+  await db.auth.signOut();
+ }
+}
+
+checkLogin();
+loadNews();
+</script>
+
+</body>
+</html>
